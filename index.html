@@ -1,0 +1,420 @@
+<!-- Firebase compat (NO module imports) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+  /***********************
+   * 0) 你需要改的兩個地方
+   ***********************/
+  const EVENT_ID = "ignite-2026"; // 所有手機要一樣
+ const firebaseConfig = {
+  apiKey: "xxxxx",
+  authDomain: "xxxxx.firebaseapp.com",
+  projectId: "xxxxx",
+  storageBucket: "xxxxx.appspot.com",
+  messagingSenderId: "xxxxx",
+  appId: "xxxxx"
+};
+
+
+  /***********************
+   * 1) init
+   ***********************/
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  const stateRef = db.collection("events").doc(EVENT_ID).collection("state").doc("main");
+
+  const KEY_LOCAL = "ignite_scoring_local_cache_v1";
+
+  function buildDefaultPlayers() {
+    const groups = "ABCDEFGHI".split("");
+    const players = [];
+    for (const g of groups) {
+      for (let i = 1; i <= 10; i++) {
+        const id = `${g}${String(i).padStart(2, "0")}`;
+        players.push({ id, name: id, group: g, score: 0 });
+      }
+    }
+    return players;
+  }
+
+  const DEFAULT_STATE = {
+    settings: { plusValues: [2,5,10,15], minusValues: [2,5,10], allowNegative: true, adminPin: "2468" },
+    players: buildDefaultPlayers(),
+    lastAction: null
+  };
+
+  function loadLocalCache() {
+    try {
+      const raw = localStorage.getItem(KEY_LOCAL);
+      if (!raw) return clone(DEFAULT_STATE);
+      const parsed = JSON.parse(raw);
+      return {
+        settings: { ...DEFAULT_STATE.settings, ...(parsed.settings || {}) },
+        players: Array.isArray(parsed.players) ? parsed.players : structuredClone(DEFAULT_STATE.players),
+        lastAction: parsed.lastAction ?? null
+      };
+    } catch {
+      return Clone(DEFAULT_STATE);
+    }
+  }
+  function saveLocalCache() { localStorage.setItem(KEY_LOCAL, JSON.stringify(state)); }
+
+  let state = loadLocalCache();
+  let mode = "judge";
+  let selectedPlayerId = state.players[0]?.id ?? null;
+  let connected = false;
+  let myUid = null;
+
+  const $ = (id) => document.getElementById(id);
+
+// 有些環境沒有 structuredClone，避免直接炸掉
+const clone = (obj) => (window.structuredClone ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)));
+
+// 安全綁事件：元素不存在就略過，不讓整段 JS 崩掉
+const on = (id, evt, handler) => {
+  const el = $(id);
+  if (el) el.addEventListener(evt, handler);
+};
+
+
+  function groupTotals(players) {
+    const totals = {};
+    for (const p of players) totals[p.group] = (totals[p.group] ?? 0) + (Number(p.score) || 0);
+    return totals;
+  }
+  function getPlayer(players, pid) { return players.find(p => p.id === pid); }
+  function parseNumberList(str) {
+    return (str || "").split(",").map(s => s.trim()).filter(Boolean).map(Number)
+      .filter(n => Number.isFinite(n) && n !== 0);
+  }
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function ensureRemoteInitialized() {
+    const snap = await stateRef.get();
+    if (!snap.exists) await stateRef.set(Clone(DEFAULT_STATE));
+  }
+
+  function attachRealtimeListener() {
+    stateRef.onSnapshot((snap) => {
+      if (!snap.exists) return;
+      const remote = snap.data();
+      state = {
+        settings: { ...DEFAULT_STATE.settings, ...(remote.settings || {}) },
+        players: Array.isArray(remote.players) ? remote.players : Clone(DEFAULT_STATE.players),
+        lastAction: remote.lastAction ?? null
+      };
+      saveLocalCache();
+      renderAll();
+      connected = true;
+      $("syncPill").textContent = "同步：已連線";
+    }, (err) => {
+      connected = false;
+      $("syncPill").textContent = "同步：錯誤/離線";
+      console.error(err);
+      renderAll();
+    });
+  }
+
+  async function applyDeltaRemote(pid, delta) {
+    if (!pid) return;
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(stateRef);
+      const data = snap.exists ? snap.data() : Clone(DEFAULT_STATE);
+      const players = Array.isArray(data.players) ? data.players : [];
+      const settings = { ...DEFAULT_STATE.settings, ...(data.settings || {}) };
+
+      const idx = players.findIndex(p => p.id === pid);
+      if (idx < 0) throw new Error("player not found");
+
+      const prev = Number(players[idx].score) || 0;
+      let next = prev + delta;
+      if (!settings.allowNegative) next = Math.max(0, next);
+
+      players[idx].score = next;
+      const lastAction = { playerId: pid, delta, prevScore: prev, ts: Date.now(), by: myUid || "unknown" };
+      tx.set(stateRef, { ...data, players, lastAction });
+    });
+  }
+
+  async function saveAdminSettingsRemote(nextSettings) {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(stateRef);
+      const data = snap.exists ? snap.data() : Clone(DEFAULT_STATE);
+      tx.set(stateRef, { ...data, settings: nextSettings });
+    });
+  }
+
+  async function resetScoresRemote(factory = false) {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(stateRef);
+      const data = snap.exists ? snap.data() : Clone(DEFAULT_STATE);
+      if (factory) { tx.set(stateRef, Clone(DEFAULT_STATE)); return; }
+      const players = (Array.isArray(data.players) ? data.players : Clone(DEFAULT_STATE.players))
+        .map(p => ({ ...p, score: 0 }));
+      tx.set(stateRef, { ...data, players, lastAction: null });
+    });
+  }
+
+  function renderModePill() {
+    $("modePill").textContent = `模式：${mode === "judge" ? "關主" : "管理者"}`;
+    $("judgePanel").style.display = mode === "judge" ? "" : "none";
+    $("adminPanel").style.display = mode === "admin" ? "" : "none";
+  }
+
+  function renderGroupFilter() {
+    const groups = Array.from(new Set(state.players.map(p => p.group))).sort();
+    const sel = $("groupFilter");
+    const current = sel.value || "ALL";
+    sel.innerHTML = "";
+    const optAll = document.createElement("option");
+    optAll.value = "ALL"; optAll.textContent = "全部";
+    sel.appendChild(optAll);
+    for (const g of groups) {
+      const opt = document.createElement("option");
+      opt.value = g; opt.textContent = `第 ${g} 組`;
+      sel.appendChild(opt);
+    }
+    sel.value = current;
+  }
+
+  function renderPlayerList() {
+    const query = $("searchInput").value.trim().toLowerCase();
+    const group = $("groupFilter").value || "ALL";
+
+    const list = state.players
+      .filter(p => group === "ALL" ? true : p.group === group)
+      .filter(p => !query ? true : (p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query)))
+      .sort((a,b) => a.id.localeCompare(b.id, "en"));
+
+    const sel = $("playerSelect");
+    sel.innerHTML = "";
+    for (const p of list) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = `${p.id}（第${p.group}組）  分數：${p.score}`;
+      if (p.id === selectedPlayerId) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    if (list.length && !list.some(p => p.id === selectedPlayerId)) selectedPlayerId = list[0].id;
+    if (!list.length) selectedPlayerId = null;
+  }
+
+  function renderKPIs() {
+    const p = selectedPlayerId ? getPlayer(state.players, selectedPlayerId) : null;
+    const totals = groupTotals(state.players);
+
+    $("kpiPlayer").textContent = p ? p.name : "—";
+    $("kpiPlayerScore").textContent = p ? String(p.score) : "0";
+    $("kpiGroup").textContent = p ? `第 ${p.group} 組` : "—";
+    $("kpiGroupScore").textContent = p ? String(totals[p.group] ?? 0) : "0";
+
+    if (state.lastAction) {
+      const a = state.lastAction;
+      const sign = a.delta > 0 ? "+" : "";
+      $("lastActionText").textContent = `上一步：${a.playerId}  ${sign}${a.delta}（原本 ${a.prevScore}）`;
+    } else {
+      $("lastActionText").textContent = "尚無操作";
+    }
+  }
+
+  function renderScoreButtons() {
+    const row = $("scoreButtonsRow");
+    row.innerHTML = "";
+
+    const p = selectedPlayerId ? getPlayer(state.players, selectedPlayerId) : null;
+    const disabled = !p || !connected;
+
+    for (const v of state.settings.plusValues) {
+      const b = document.createElement("button");
+      b.className = "btn big primary";
+      b.textContent = `+${v}`;
+      b.disabled = disabled;
+      b.onclick = () => applyDeltaRemote(p.id, +v);
+      row.appendChild(b);
+    }
+    for (const v of state.settings.minusValues) {
+      const b = document.createElement("button");
+      b.className = "btn big danger";
+      b.textContent = `-${v}`;
+      b.disabled = disabled;
+      b.onclick = () => applyDeltaRemote(p.id, -v);
+      row.appendChild(b);
+    }
+  }
+
+  function renderPersonalTable() {
+    const tbody = $("personalTable").querySelector("tbody");
+    tbody.innerHTML = "";
+
+    const sorted = [...state.players].sort((a,b) => (b.score-a.score) || a.id.localeCompare(b.id,"en"));
+    $("personalCount").textContent = `${sorted.length} 人`;
+
+    sorted.forEach((p, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${i+1}</td><td>${p.name}</td><td>${p.group}</td><td>${p.score}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderGroupTable() {
+    const tbody = $("groupTable").querySelector("tbody");
+    tbody.innerHTML = "";
+
+    const totals = groupTotals(state.players);
+    const groups = Object.keys(totals).sort((a,b)=>a.localeCompare(b,"en"));
+    const sorted = groups.map(g => ({ group: g, total: totals[g] }))
+      .sort((a,b) => b.total-a.total || a.group.localeCompare(b.group,"en"));
+
+    $("groupCount").textContent = `${sorted.length} 組`;
+    sorted.forEach((g, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${i+1}</td><td>第 ${g.group} 組</td><td>${g.total}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderAdminPanel() {
+    $("adminPlusValues").value = state.settings.plusValues.join(",");
+    $("adminMinusValues").value = state.settings.minusValues.join(",");
+    $("adminAllowNegative").value = String(state.settings.allowNegative);
+    $("adminPin").value = state.settings.adminPin;
+  }
+
+  function renderAll() {
+    renderModePill();
+    renderGroupFilter();
+    renderPlayerList();
+    renderKPIs();
+    renderScoreButtons();
+    renderPersonalTable();
+    renderGroupTable();
+    if (mode === "admin") renderAdminPanel();
+  }
+
+// Modal: 取代 prompt（但若你 HTML 沒有 modal 元素，也不會炸）
+function openPinModal() {
+  const modal = $("pinModal");
+  const input = $("pinInput");
+
+  // 如果頁面沒有 modal HTML，就退回 prompt，至少功能能用
+  if (!modal || !input) {
+    const pin = window.prompt("輸入管理者 PIN：");
+    if (pin === state.settings.adminPin) { mode = "admin"; renderAll(); }
+    else if (pin !== null) alert("PIN 錯誤");
+    return;
+  }
+
+  modal.style.display = "flex";
+  input.value = "";
+  input.focus();
+}
+function closePinModal() {
+  const modal = $("pinModal");
+  if (modal) modal.style.display = "none";
+}
+
+// 用安全綁定（元素不存在也不會讓整段 JS 中止）
+on("pinCancelBtn", "click", closePinModal);
+on("pinOkBtn", "click", () => {
+  const input = $("pinInput");
+  const pin = input ? input.value.trim() : "";
+  if (pin === state.settings.adminPin) { mode = "admin"; closePinModal(); renderAll(); }
+  else alert("PIN 錯誤");
+});
+
+
+  $("searchInput").addEventListener("input", renderAll);
+  $("groupFilter").addEventListener("change", renderAll);
+  $("playerSelect").addEventListener("change", (e) => { selectedPlayerId = e.target.value; renderAll(); });
+
+  $("switchModeBtn").addEventListener("click", () => {
+    if (mode === "judge") openPinModal();
+    else { mode = "judge"; renderAll(); }
+  });
+
+  $("undoBtn").addEventListener("click", async () => {
+    if (!state.lastAction) return;
+    const a = state.lastAction;
+    await applyDeltaRemote(a.playerId, -a.delta);
+  });
+
+  $("adminSaveBtn").addEventListener("click", async () => {
+    const plus = parseNumberList($("adminPlusValues").value);
+    const minus = parseNumberList($("adminMinusValues").value);
+    if (!plus.length) return alert("加分按鈕至少要有一個非零數值");
+
+    const nextSettings = {
+      plusValues: plus,
+      minusValues: minus,
+      allowNegative: $("adminAllowNegative").value === "true",
+      adminPin: $("adminPin").value.trim() || state.settings.adminPin
+    };
+    await saveAdminSettingsRemote(nextSettings);
+    alert("已儲存設定（已同步）");
+  });
+
+  $("resetScoresBtn").addEventListener("click", async () => {
+    if (!confirm("確定要重設所有分數為 0？（會同步到所有手機）")) return;
+    await resetScoresRemote(false);
+  });
+
+  $("factoryResetBtn").addEventListener("click", async () => {
+    if (!confirm("確定要恢復預設（分數+設定全部重設）？（會同步到所有手機）")) return;
+    await resetScoresRemote(true);
+  });
+
+  $("exportBtn").addEventListener("click", () => {
+    const totals = groupTotals(state.players);
+    const personal = [...state.players].sort((a,b)=> (b.score-a.score) || a.id.localeCompare(b.id,"en"));
+    const groupSorted = Object.keys(totals).map(g => ({g, t: totals[g]})).sort((a,b)=> (b.t-a.t) || a.g.localeCompare(b.g,"en"));
+
+    const lines = [];
+    lines.push("TYPE,Rank,ID,Name,Group,Score");
+    personal.forEach((p, i) => lines.push(`PERSONAL,${i+1},${p.id},${p.name},${p.group},${p.score}`));
+    lines.push("");
+    lines.push("TYPE,Rank,Group,Total");
+    groupSorted.forEach((x, i) => lines.push(`GROUP,${i+1},${x.g},${x.t}`));
+
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+    downloadText(`ignite-scores-${stamp}.csv`, lines.join("\n"));
+  });
+
+  // Boot
+  $("syncPill").textContent = "同步：登入中…";
+  renderAll();
+
+  auth.onAuthStateChanged(async (user) => {
+    if (!user) return;
+    myUid = user.uid;
+    try {
+      await ensureRemoteInitialized();
+      attachRealtimeListener();
+      connected = true;
+      $("syncPill").textContent = "同步：已連線";
+      renderAll();
+    } catch (e) {
+      console.error(e);
+      connected = false;
+      $("syncPill").textContent = "同步：設定錯誤";
+      renderAll();
+    }
+  });
+
+  auth.signInAnonymously().catch((e) => {
+    console.error(e);
+    connected = false;
+    $("syncPill").textContent = "同步：無法登入";
+  });
+</script>
+
