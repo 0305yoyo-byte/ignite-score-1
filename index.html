@@ -75,9 +75,19 @@
           <div class="box"><div class="label">個人分數</div><div class="value" id="kpiPlayerScore">0</div></div>
           <div class="box"><div class="label">所屬小組</div><div class="value" id="kpiGroup">—</div></div>
           <div class="box"><div class="label">小組總分</div><div class="value" id="kpiGroupScore">0</div></div>
+          <!-- ✅ 新增：只加小組的額外分數顯示 -->
+          <div class="box"><div class="label">小組額外分</div><div class="value" id="kpiGroupBonus">0</div></div>
         </div>
 
         <div id="judgePanel" style="margin-top:12px;">
+          <!-- ✅ 新增：只加小組分數 toggle -->
+          <div class="row" style="margin-bottom:10px;">
+            <label style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" id="groupOnlyToggle" />
+              <span class="muted">只加小組分數（不算在個人）</span>
+            </label>
+          </div>
+
           <div class="row" id="scoreButtonsRow"></div>
           <div class="row" style="margin-top:10px;">
             <button class="btn danger" id="undoBtn">復原上一步（本機）</button>
@@ -137,7 +147,7 @@
 
     <div class="card">
       <div class="row" style="justify-content:space-between;">
-        <div><div style="font-weight:700;">小組排行榜</div><div class="muted">9 組總分</div></div>
+        <div><div style="font-weight:700;">小組排行榜</div><div class="muted">9 組總分（含額外分）</div></div>
         <span class="pill" id="groupCount">0 組</span>
       </div>
       <div style="overflow:auto; margin-top:8px;">
@@ -145,6 +155,9 @@
           <thead><tr><th>#</th><th>小組</th><th>總分</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+      <div class="muted" style="margin-top:8px;">
+        註：小組總分 = 小隊員分數加總 + 小組額外分（只加小組模式）
       </div>
     </div>
   </section>
@@ -202,22 +215,33 @@
     return players;
   }
 
+  // ✅ 新增：小組額外分（不算在個人）
+  function defaultGroupBonus() {
+    return { A:0, B:0, C:0, D:0, E:0, F:0, G:0, H:0, I:0 };
+  }
+
   const DEFAULT_STATE = {
     settings: { plusValues:[2,5,10,15], minusValues:[2,5,10], allowNegative:true, adminPin:"2468" },
     players: buildDefaultPlayers(),
+    groupBonus: defaultGroupBonus(),  // ✅新增
     lastAction: null
   };
+
+  function normalizeState(raw){
+    const s = raw || {};
+    return {
+      settings: { ...DEFAULT_STATE.settings, ...(s.settings || {}) },
+      players: Array.isArray(s.players) ? s.players : clone(DEFAULT_STATE.players),
+      groupBonus: s.groupBonus ? { ...defaultGroupBonus(), ...s.groupBonus } : clone(DEFAULT_STATE.groupBonus),
+      lastAction: s.lastAction ?? null
+    };
+  }
 
   function loadLocalCache(){
     try{
       const raw = localStorage.getItem(KEY_LOCAL);
       if(!raw) return clone(DEFAULT_STATE);
-      const parsed = JSON.parse(raw);
-      return {
-        settings: { ...DEFAULT_STATE.settings, ...(parsed.settings||{}) },
-        players: Array.isArray(parsed.players) ? parsed.players : clone(DEFAULT_STATE.players),
-        lastAction: parsed.lastAction ?? null
-      };
+      return normalizeState(JSON.parse(raw));
     }catch{ return clone(DEFAULT_STATE); }
   }
   function saveLocalCache(){ localStorage.setItem(KEY_LOCAL, JSON.stringify(state)); }
@@ -228,11 +252,14 @@
   let connected = false;
   let myUid = null;
 
-  function groupTotals(players){
+  // ✅ 小組總分 = 個人加總 + groupBonus
+  function groupTotals(players, groupBonus){
     const t={};
     for(const p of players) t[p.group]=(t[p.group]??0)+(Number(p.score)||0);
+    for (const g of Object.keys(groupBonus || {})) t[g] = (t[g] ?? 0) + (Number(groupBonus[g]) || 0);
     return t;
   }
+
   function getPlayer(players,pid){ return players.find(p=>p.id===pid); }
   function parseNumberList(str){
     return (str||"").split(",").map(s=>s.trim()).filter(Boolean).map(Number).filter(n=>Number.isFinite(n)&&n!==0);
@@ -252,12 +279,7 @@
   function attachRealtimeListener(){
     stateRef.onSnapshot((snap)=>{
       if(!snap.exists) return;
-      const remote=snap.data();
-      state={
-        settings:{...DEFAULT_STATE.settings,...(remote.settings||{})},
-        players:Array.isArray(remote.players)?remote.players:clone(DEFAULT_STATE.players),
-        lastAction:remote.lastAction??null
-      };
+      state = normalizeState(snap.data());
       saveLocalCache();
       renderAll();
       connected=true;
@@ -274,35 +296,58 @@
     if(!pid) return;
     await db.runTransaction(async (tx)=>{
       const snap=await tx.get(stateRef);
-      const data=snap.exists?snap.data():clone(DEFAULT_STATE);
-      const players=Array.isArray(data.players)?data.players:[];
-      const settings={...DEFAULT_STATE.settings,...(data.settings||{})};
+      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
+
+      const players = Array.isArray(data.players) ? data.players : [];
+      const settings = { ...DEFAULT_STATE.settings, ...(data.settings || {}) };
+
       const idx=players.findIndex(p=>p.id===pid);
       if(idx<0) throw new Error("player not found");
+
       const prev=Number(players[idx].score)||0;
       let next=prev+delta;
       if(!settings.allowNegative) next=Math.max(0,next);
       players[idx].score=next;
-      const lastAction={playerId:pid,delta,prevScore:prev,ts:Date.now(),by:myUid||"unknown"};
-      tx.set(stateRef,{...data,players,lastAction});
+
+      const lastAction={ type:"PLAYER", playerId:pid, delta, prevScore:prev, ts:Date.now(), by:myUid||"unknown" };
+      tx.set(stateRef,{ ...data, players, lastAction });
+    });
+  }
+
+  // ✅ 新增：只加小組額外分（不算個人）
+  async function applyGroupBonusRemote(group, delta){
+    if(!group) return;
+    await db.runTransaction(async (tx)=>{
+      const snap=await tx.get(stateRef);
+      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
+
+      const groupBonus = data.groupBonus ? { ...defaultGroupBonus(), ...data.groupBonus } : defaultGroupBonus();
+      const prev = Number(groupBonus[group] || 0);
+      const next = prev + delta;
+      groupBonus[group] = next;
+
+      const lastAction={ type:"GROUP_ONLY", group, delta, prevGroupBonus:prev, ts:Date.now(), by:myUid||"unknown" };
+      tx.set(stateRef,{ ...data, groupBonus, lastAction });
     });
   }
 
   async function saveAdminSettingsRemote(nextSettings){
     await db.runTransaction(async (tx)=>{
       const snap=await tx.get(stateRef);
-      const data=snap.exists?snap.data():clone(DEFAULT_STATE);
-      tx.set(stateRef,{...data,settings:nextSettings});
+      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
+      tx.set(stateRef,{ ...data, settings: nextSettings });
     });
   }
 
   async function resetScoresRemote(factory=false){
     await db.runTransaction(async (tx)=>{
       const snap=await tx.get(stateRef);
-      const data=snap.exists?snap.data():clone(DEFAULT_STATE);
+      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
       if(factory){ tx.set(stateRef,clone(DEFAULT_STATE)); return; }
-      const players=(Array.isArray(data.players)?data.players:clone(DEFAULT_STATE.players)).map(p=>({...p,score:0}));
-      tx.set(stateRef,{...data,players,lastAction:null});
+
+      const players = data.players.map(p=>({ ...p, score:0 }));
+      const groupBonus = defaultGroupBonus(); // ✅ 重設時也清掉小組額外分
+      tx.set(stateRef,{ ...data, players, groupBonus, lastAction:null });
     });
   }
 
@@ -344,14 +389,23 @@
 
   function renderKPIs(){
     const p=selectedPlayerId?getPlayer(state.players,selectedPlayerId):null;
-    const totals=groupTotals(state.players);
+    const totals=groupTotals(state.players, state.groupBonus);
+
     $("kpiPlayer").textContent=p?p.name:"—";
     $("kpiPlayerScore").textContent=p?String(p.score):"0";
     $("kpiGroup").textContent=p?`第 ${p.group} 組`:"—";
     $("kpiGroupScore").textContent=p?String(totals[p.group]??0):"0";
+    $("kpiGroupBonus").textContent=p?String(state.groupBonus?.[p.group] ?? 0):"0";
+
     if(state.lastAction){
-      const a=state.lastAction; const sign=a.delta>0?"+":"";
-      $("lastActionText").textContent=`上一步：${a.playerId} ${sign}${a.delta}（原本 ${a.prevScore}）`;
+      const a=state.lastAction;
+      if (a.type === "GROUP_ONLY") {
+        const sign=a.delta>0?"+":"";
+        $("lastActionText").textContent=`上一步：第 ${a.group} 組（只加小組） ${sign}${a.delta}（原本額外分 ${a.prevGroupBonus}）`;
+      } else {
+        const sign=a.delta>0?"+":"";
+        $("lastActionText").textContent=`上一步：${a.playerId} ${sign}${a.delta}（原本 ${a.prevScore}）`;
+      }
     }else $("lastActionText").textContent="尚無操作";
   }
 
@@ -359,16 +413,19 @@
     const row=$("scoreButtonsRow"); row.innerHTML="";
     const p=selectedPlayerId?getPlayer(state.players,selectedPlayerId):null;
     const disabled=!p || !connected;
+
+    const groupOnly = $("groupOnlyToggle")?.checked === true;
+
     for(const v of state.settings.plusValues){
       const b=document.createElement("button");
       b.className="btn big primary"; b.textContent=`+${v}`; b.disabled=disabled;
-      b.onclick=()=>applyDeltaRemote(p.id,+v);
+      b.onclick=()=> groupOnly ? applyGroupBonusRemote(p.group, +v) : applyDeltaRemote(p.id, +v);
       row.appendChild(b);
     }
     for(const v of state.settings.minusValues){
       const b=document.createElement("button");
       b.className="btn big danger"; b.textContent=`-${v}`; b.disabled=disabled;
-      b.onclick=()=>applyDeltaRemote(p.id,-v);
+      b.onclick=()=> groupOnly ? applyGroupBonusRemote(p.group, -v) : applyDeltaRemote(p.id, -v);
       row.appendChild(b);
     }
   }
@@ -386,7 +443,7 @@
 
   function renderGroupTable(){
     const tbody=$("groupTable").querySelector("tbody"); tbody.innerHTML="";
-    const totals=groupTotals(state.players);
+    const totals=groupTotals(state.players, state.groupBonus);
     const groups=Object.keys(totals).sort((a,b)=>a.localeCompare(b,"en"));
     const sorted=groups.map(g=>({group:g,total:totals[g]})).sort((a,b)=>b.total-a.total||a.group.localeCompare(b.group,"en"));
     $("groupCount").textContent=`${sorted.length} 組`;
@@ -429,12 +486,20 @@
   on("groupFilter","change",renderAll);
   on("playerSelect","change",(e)=>{ selectedPlayerId=e.target.value; renderAll(); });
 
+  on("groupOnlyToggle","change",renderAll); // ✅ toggle 變更重畫
+
   on("switchModeBtn","click",()=>{ if(mode==="judge") openPinModal(); else { mode="judge"; renderAll(); } });
 
   on("undoBtn","click",async ()=>{
     if(!state.lastAction) return;
     const a=state.lastAction;
-    await applyDeltaRemote(a.playerId,-a.delta);
+
+    // 注意：同步版「復原」其實是再送一筆反向操作；GROUP_ONLY 也支援
+    if (a.type === "GROUP_ONLY") {
+      await applyGroupBonusRemote(a.group, -a.delta);
+    } else {
+      await applyDeltaRemote(a.playerId, -a.delta);
+    }
   });
 
   on("adminSaveBtn","click",async ()=>{
@@ -452,25 +517,33 @@
   });
 
   on("resetScoresBtn","click",async ()=>{
-    if(!confirm("確定要重設所有分數為 0？")) return;
+    if(!confirm("確定要重設所有分數為 0？（個人+小組額外分都會清空）")) return;
     await resetScoresRemote(false);
   });
 
   on("factoryResetBtn","click",async ()=>{
-    if(!confirm("確定要恢復預設（分數+設定）？")) return;
+    if(!confirm("確定要恢復預設（分數+設定全部重設）？")) return;
     await resetScoresRemote(true);
   });
 
   on("exportBtn","click",()=>{
-    const totals=groupTotals(state.players);
+    const totals=groupTotals(state.players, state.groupBonus);
     const personal=[...state.players].sort((a,b)=>(b.score-a.score)||a.id.localeCompare(b.id,"en"));
     const groupSorted=Object.keys(totals).map(g=>({g,t:totals[g]})).sort((a,b)=>(b.t-a.t)||a.g.localeCompare(b.g,"en"));
+
     const lines=[];
     lines.push("TYPE,Rank,ID,Name,Group,Score");
     personal.forEach((p,i)=>lines.push(`PERSONAL,${i+1},${p.id},${p.name},${p.group},${p.score}`));
+
+    lines.push("");
+    lines.push("TYPE,Group,GroupBonus");
+    const gb = state.groupBonus || defaultGroupBonus();
+    Object.keys(gb).sort().forEach(g=>lines.push(`GROUP_BONUS,${g},${gb[g]}`));
+
     lines.push("");
     lines.push("TYPE,Rank,Group,Total");
     groupSorted.forEach((x,i)=>lines.push(`GROUP,${i+1},${x.g},${x.t}`));
+
     const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
     downloadText(`ignite-scores-${stamp}.csv`,lines.join("\n"));
   });
