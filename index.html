@@ -29,15 +29,17 @@
     .pill { display:inline-block; padding: 4px 10px; border-radius: 999px; background:#f0f1f7; font-size: 12px; color:#333; }
     .muted { color:#666; font-size: 12px; }
     .kpi { display:flex; gap:10px; flex-wrap:wrap; }
-    .kpi .box { border:1px solid #eee; border-radius: 12px; padding: 10px 12px; min-width: 120px; }
+    .kpi .box { border:1px solid #eee; border-radius: 12px; padding: 10px 12px; min-width: 140px; }
     .kpi .box .label { font-size: 12px; color:#666; }
     .kpi .box .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
     .modalBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; padding: 16px; z-index: 100; }
     .modal { width: min(520px, 100%); background:#fff; border-radius: 16px; border:1px solid #e7e7ef; padding: 14px; }
     .modal h2 { margin: 0; font-size: 16px; }
     .modal .actions { display:flex; gap:10px; justify-content:flex-end; margin-top: 12px; flex-wrap: wrap; }
+    hr.sep { border:none; border-top:1px solid #e7e7ef; margin: 12px 0; }
   </style>
 </head>
+
 <body>
 <header>
   <h1>Ignite 計分系統（同步版）</h1>
@@ -54,9 +56,9 @@
     <div class="row">
       <div class="grow">
         <label class="muted">搜尋玩家（姓名 / 編號）</label>
-        <input id="searchInput" placeholder="例如：A01 或 小明" />
+        <input id="searchInput" placeholder="例如：3-01 或 小明" />
       </div>
-      <div style="min-width: 160px;">
+      <div style="min-width: 200px;">
         <label class="muted">顯示小組</label>
         <select id="groupFilter"></select>
       </div>
@@ -73,27 +75,12 @@
         <div class="kpi" style="margin-top:8px;">
           <div class="box"><div class="label">玩家</div><div class="value" id="kpiPlayer">—</div></div>
           <div class="box"><div class="label">個人分數</div><div class="value" id="kpiPlayerScore">0</div></div>
-          <div class="box"><div class="label">所屬小組</div><div class="value" id="kpiGroup">—</div></div>
+          <div class="box"><div class="label">小組</div><div class="value" id="kpiGroup">—</div></div>
           <div class="box"><div class="label">小組總分</div><div class="value" id="kpiGroupScore">0</div></div>
           <div class="box"><div class="label">小組額外分</div><div class="value" id="kpiGroupBonus">0</div></div>
         </div>
 
-        <!-- ✅ 新增：設定小隊員名字 / 小隊名字 -->
-        <div class="row" style="margin-top:10px;">
-          <div class="grow">
-            <label class="muted">小隊員名字（同步）</label>
-            <input id="playerNameInput" placeholder="例如：鈾恩" />
-          </div>
-          <div class="grow">
-            <label class="muted">小隊名字（同步）</label>
-            <input id="teamNameInput" placeholder="例如：量子火箭隊" />
-          </div>
-        </div>
-        <div class="row" style="margin-top:8px;">
-          <button class="btn primary" id="saveNamesBtn">儲存名字（同步）</button>
-          <span class="muted">提示：先選玩家，再輸入名字/小隊名，按儲存。</span>
-        </div>
-
+        <!-- Judge Panel -->
         <div id="judgePanel" style="margin-top:12px;">
           <div class="row" style="margin-bottom:10px;">
             <label style="display:flex; gap:8px; align-items:center;">
@@ -103,15 +90,18 @@
           </div>
 
           <div class="row" id="scoreButtonsRow"></div>
+
           <div class="row" style="margin-top:10px;">
-            <button class="btn danger" id="undoBtn">復原上一步（本機）</button>
+            <button class="btn danger" id="undoBtn">復原上一步（同步反向）</button>
             <span class="muted" id="lastActionText">尚無操作</span>
           </div>
         </div>
 
+        <!-- Admin Panel -->
         <div id="adminPanel" style="margin-top:12px; display:none;">
           <div class="card" style="background:#fafbff;">
             <div class="muted" style="margin-bottom:8px;">管理者設定（會同步到所有手機）</div>
+
             <div class="grid2">
               <div>
                 <label class="muted">加分按鈕（逗號分隔）</label>
@@ -133,14 +123,60 @@
                 <input id="adminPin" placeholder="預設 2468" />
               </div>
             </div>
+
             <div class="row" style="margin-top:10px;">
               <button class="btn primary" id="adminSaveBtn">儲存設定</button>
               <button class="btn danger" id="resetScoresBtn">重設所有分數</button>
               <button class="btn danger" id="factoryResetBtn">恢復預設</button>
             </div>
           </div>
-        </div>
 
+          <div class="card" style="background:#fafbff; margin-top:12px;">
+            <div class="muted" style="margin-bottom:8px;">名單 / 小隊設定（只有管理者可操作）</div>
+
+            <div class="grid2">
+              <div>
+                <label class="muted">選取玩家（要改名字用）</label>
+                <select id="adminPlayerSelect"></select>
+              </div>
+              <div>
+                <label class="muted">小隊員名字（同步）</label>
+                <input id="adminPlayerNameInput" placeholder="例如：小明" />
+              </div>
+              <div>
+                <label class="muted">玩家所在小組</label>
+                <input id="adminPlayerGroupView" disabled />
+              </div>
+              <div>
+                <label class="muted">小隊名字（同步，針對該玩家的小組）</label>
+                <input id="adminTeamNameInput" placeholder="例如：量子火箭隊" />
+              </div>
+            </div>
+
+            <div class="row" style="margin-top:10px;">
+              <button class="btn primary" id="adminSaveNamesBtn">儲存名字/小隊名（同步）</button>
+            </div>
+
+            <hr class="sep">
+
+            <div class="grid2">
+              <div>
+                <label class="muted">新增組員：小組（1~9）</label>
+                <select id="adminAddGroup"></select>
+              </div>
+              <div>
+                <label class="muted">新增組員：名字（可空，空就用編號）</label>
+                <input id="adminAddName" placeholder="例如：阿哲" />
+              </div>
+            </div>
+
+            <div class="row" style="margin-top:10px;">
+              <button class="btn primary" id="adminAddPlayerBtn">新增組員（同步）</button>
+              <span class="muted">會自動產生新編號，例如：3-11、3-12…</span>
+            </div>
+          </div>
+
+        </div>
       </div>
     </div>
   </section>
@@ -148,12 +184,15 @@
   <section class="grid2">
     <div class="card">
       <div class="row" style="justify-content:space-between;">
-        <div><div style="font-weight:700;">個人排行榜</div><div class="muted">依個人總分排序</div></div>
+        <div>
+          <div style="font-weight:700;">個人排行榜</div>
+          <div class="muted">依個人總分排序</div>
+        </div>
         <span class="pill" id="personalCount">0 人</span>
       </div>
       <div style="overflow:auto; margin-top:8px;">
         <table id="personalTable">
-          <thead><tr><th>#</th><th>玩家</th><th>組別</th><th>分數</th></tr></thead>
+          <thead><tr><th>#</th><th>玩家</th><th>小隊</th><th>分數</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -161,7 +200,10 @@
 
     <div class="card">
       <div class="row" style="justify-content:space-between;">
-        <div><div style="font-weight:700;">小組排行榜</div><div class="muted">9 組總分（含額外分）</div></div>
+        <div>
+          <div style="font-weight:700;">小組排行榜</div>
+          <div class="muted">9 組總分（含額外分）</div>
+        </div>
         <span class="pill" id="groupCount">0 組</span>
       </div>
       <div style="overflow:auto; margin-top:8px;">
@@ -198,7 +240,10 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-  const EVENT_ID = "ignite-2026";
+  /***********************
+   * 0) 你需要確認的兩個地方
+   ***********************/
+  const EVENT_ID = "ignite-2026"; // 所有手機要一樣
 
   const firebaseConfig = {
     apiKey: "AIzaSyDC7xxiblAf7VwMJrEcZbwApUO1URzj-j0",
@@ -209,6 +254,9 @@
     appId: "1:538098106664:web:d04f69c272083f5c39101d"
   };
 
+  /***********************
+   * 1) init
+   ***********************/
   firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.firestore();
@@ -219,30 +267,39 @@
   const clone = (obj) => (window.structuredClone ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)));
   const on = (id, evt, handler) => { const el = $(id); if (el) el.addEventListener(evt, handler); };
 
+  /***********************
+   * 2) data model
+   ***********************/
+  function groups19() { return ["1","2","3","4","5","6","7","8","9"]; }
+
   function buildDefaultPlayers() {
-    const groups = "ABCDEFGHI".split("");
     const players = [];
-    for (const g of groups) for (let i=1;i<=10;i++){
-      const id = `${g}${String(i).padStart(2,"0")}`;
-      players.push({ id, name: id, group: g, score: 0 });
+    for (const g of groups19()) {
+      for (let i = 1; i <= 10; i++) {
+        const id = `${g}-${String(i).padStart(2,"0")}`; // 例如 3-01
+        players.push({ id, name: id, group: g, score: 0 });
+      }
     }
     return players;
   }
 
   function defaultGroupBonus() {
-    return { A:0, B:0, C:0, D:0, E:0, F:0, G:0, H:0, I:0 };
+    const gb = {};
+    for (const g of groups19()) gb[g] = 0;
+    return gb;
   }
 
-  // ✅ 新增：小隊名字（每組一個）
   function defaultTeamNames() {
-    return { A:"第 A 組", B:"第 B 組", C:"第 C 組", D:"第 D 組", E:"第 E 組", F:"第 F 組", G:"第 G 組", H:"第 H 組", I:"第 I 組" };
+    const tn = {};
+    for (const g of groups19()) tn[g] = `第${g}組`;
+    return tn;
   }
 
   const DEFAULT_STATE = {
     settings: { plusValues:[2,5,10,15], minusValues:[2,5,10], allowNegative:true, adminPin:"2468" },
     players: buildDefaultPlayers(),
     groupBonus: defaultGroupBonus(),
-    teamNames: defaultTeamNames(),   // ✅新增
+    teamNames: defaultTeamNames(),
     lastAction: null
   };
 
@@ -252,7 +309,7 @@
       settings: { ...DEFAULT_STATE.settings, ...(s.settings || {}) },
       players: Array.isArray(s.players) ? s.players : clone(DEFAULT_STATE.players),
       groupBonus: s.groupBonus ? { ...defaultGroupBonus(), ...s.groupBonus } : clone(DEFAULT_STATE.groupBonus),
-      teamNames: s.teamNames ? { ...defaultTeamNames(), ...s.teamNames } : clone(DEFAULT_STATE.teamNames), // ✅新增
+      teamNames: s.teamNames ? { ...defaultTeamNames(), ...s.teamNames } : clone(DEFAULT_STATE.teamNames),
       lastAction: s.lastAction ?? null
     };
   }
@@ -264,35 +321,67 @@
       return normalizeState(JSON.parse(raw));
     }catch{ return clone(DEFAULT_STATE); }
   }
+
   function saveLocalCache(){ localStorage.setItem(KEY_LOCAL, JSON.stringify(state)); }
 
   let state = loadLocalCache();
-  let mode = "judge";
+  let mode = "judge"; // "judge" | "admin"
   let selectedPlayerId = state.players[0]?.id ?? null;
   let connected = false;
   let myUid = null;
 
+  /***********************
+   * 3) helpers
+   ***********************/
   function groupTotals(players, groupBonus){
-    const t={};
-    for(const p of players) t[p.group]=(t[p.group]??0)+(Number(p.score)||0);
+    const t = {};
+    for (const p of players) t[p.group] = (t[p.group] ?? 0) + (Number(p.score) || 0);
     for (const g of Object.keys(groupBonus || {})) t[g] = (t[g] ?? 0) + (Number(groupBonus[g]) || 0);
     return t;
   }
 
-  function getPlayer(players,pid){ return players.find(p=>p.id===pid); }
+  function getPlayer(players, pid){ return players.find(p => p.id === pid); }
+
   function parseNumberList(str){
-    return (str||"").split(",").map(s=>s.trim()).filter(Boolean).map(Number).filter(n=>Number.isFinite(n)&&n!==0);
-  }
-  function downloadText(filename,text){
-    const blob=new Blob([text],{type:"text/csv;charset=utf-8;"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a"); a.href=url; a.download=filename;
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    return (str||"")
+      .split(",").map(s=>s.trim()).filter(Boolean)
+      .map(Number).filter(n=>Number.isFinite(n) && n !== 0);
   }
 
+  function downloadText(filename, text){
+    const blob = new Blob([text], { type:"text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function requireAdmin(){
+    if (mode !== "admin") {
+      alert("只有管理者可以操作");
+      throw new Error("admin_required");
+    }
+  }
+
+  function nextPlayerIdForGroup(group, players) {
+    let maxN = 0;
+    for (const p of players) {
+      if (p.group !== group) continue;
+      const m = String(p.id).match(/^(\d+)-(\d+)$/);
+      if (!m) continue;
+      const n = Number(m[2]);
+      if (Number.isFinite(n)) maxN = Math.max(maxN, n);
+    }
+    return `${group}-${String(maxN + 1).padStart(2, "0")}`;
+  }
+
+  /***********************
+   * 4) firestore sync
+   ***********************/
   async function ensureRemoteInitialized(){
-    const snap=await stateRef.get();
-    if(!snap.exists) await stateRef.set(clone(DEFAULT_STATE));
+    const snap = await stateRef.get();
+    if (!snap.exists) await stateRef.set(clone(DEFAULT_STATE));
   }
 
   function attachRealtimeListener(){
@@ -300,57 +389,79 @@
       if(!snap.exists) return;
       state = normalizeState(snap.data());
       saveLocalCache();
+      connected = true;
+      $("syncPill").textContent = "同步：已連線";
       renderAll();
-      connected=true;
-      $("syncPill").textContent="同步：已連線";
-    },(err)=>{
-      connected=false;
-      $("syncPill").textContent="同步：錯誤/離線";
+    }, (err)=>{
       console.error(err);
+      connected = false;
+      $("syncPill").textContent = "同步：錯誤/離線";
       renderAll();
     });
   }
 
-  async function applyDeltaRemote(pid,delta){
-    if(!pid) return;
+  async function applyDeltaRemote(pid, delta){
+    if (!pid) return;
     await db.runTransaction(async (tx)=>{
-      const snap=await tx.get(stateRef);
+      const snap = await tx.get(stateRef);
       const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
 
       const players = Array.isArray(data.players) ? data.players : [];
       const settings = { ...DEFAULT_STATE.settings, ...(data.settings || {}) };
 
-      const idx=players.findIndex(p=>p.id===pid);
-      if(idx<0) throw new Error("player not found");
+      const idx = players.findIndex(p => p.id === pid);
+      if (idx < 0) throw new Error("player not found");
 
-      const prev=Number(players[idx].score)||0;
-      let next=prev+delta;
-      if(!settings.allowNegative) next=Math.max(0,next);
-      players[idx].score=next;
+      const prev = Number(players[idx].score) || 0;
+      let next = prev + delta;
+      if (!settings.allowNegative) next = Math.max(0, next);
+      players[idx].score = next;
 
-      const lastAction={ type:"PLAYER", playerId:pid, delta, prevScore:prev, ts:Date.now(), by:myUid||"unknown" };
-      tx.set(stateRef,{ ...data, players, lastAction });
+      const lastAction = { type:"PLAYER", playerId: pid, delta, prevScore: prev, ts: Date.now(), by: myUid || "unknown" };
+      tx.set(stateRef, { ...data, players, lastAction });
     });
   }
 
   async function applyGroupBonusRemote(group, delta){
-    if(!group) return;
+    if (!group) return;
     await db.runTransaction(async (tx)=>{
-      const snap=await tx.get(stateRef);
+      const snap = await tx.get(stateRef);
       const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
 
       const groupBonus = data.groupBonus ? { ...defaultGroupBonus(), ...data.groupBonus } : defaultGroupBonus();
       const prev = Number(groupBonus[group] || 0);
-      const next = prev + delta;
-      groupBonus[group] = next;
+      groupBonus[group] = prev + delta;
 
-      const lastAction={ type:"GROUP_ONLY", group, delta, prevGroupBonus:prev, ts:Date.now(), by:myUid||"unknown" };
-      tx.set(stateRef,{ ...data, groupBonus, lastAction });
+      const lastAction = { type:"GROUP_ONLY", group, delta, prevGroupBonus: prev, ts: Date.now(), by: myUid || "unknown" };
+      tx.set(stateRef, { ...data, groupBonus, lastAction });
     });
   }
 
-  // ✅ 新增：儲存玩家名字 + 小隊名字（同步）
-  async function saveNamesRemote(playerId, newPlayerName, group, newTeamName){
+  async function saveAdminSettingsRemote(nextSettings){
+    requireAdmin();
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(stateRef);
+      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
+      tx.set(stateRef, { ...data, settings: nextSettings, lastAction: { type:"ADMIN_SETTINGS", ts: Date.now(), by: myUid || "unknown" } });
+    });
+  }
+
+  async function resetScoresRemote(factory=false){
+    requireAdmin();
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(stateRef);
+      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
+
+      if (factory) { tx.set(stateRef, clone(DEFAULT_STATE)); return; }
+
+      const players = data.players.map(p => ({ ...p, score: 0 }));
+      const groupBonus = defaultGroupBonus();
+      tx.set(stateRef, { ...data, players, groupBonus, lastAction: { type:"ADMIN_RESET", ts: Date.now(), by: myUid || "unknown" } });
+    });
+  }
+
+  async function adminSaveNamesRemote(playerId, newPlayerName, group, newTeamName){
+    requireAdmin();
     await db.runTransaction(async (tx)=>{
       const snap = await tx.get(stateRef);
       const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
@@ -359,167 +470,236 @@
       const idx = players.findIndex(p => p.id === playerId);
       if (idx < 0) throw new Error("player not found");
 
-      if (newPlayerName) {
-        players[idx] = { ...players[idx], name: newPlayerName };
+      if (newPlayerName && newPlayerName.trim()) {
+        players[idx] = { ...players[idx], name: newPlayerName.trim() };
       }
 
       const teamNames = { ...data.teamNames };
-      if (group && newTeamName) teamNames[group] = newTeamName;
+      if (group && newTeamName && newTeamName.trim()) {
+        teamNames[group] = newTeamName.trim();
+      }
 
-      const lastAction = { type:"NAMES", playerId, group, ts:Date.now(), by:myUid||"unknown" };
-
-      tx.set(stateRef, { ...data, players, teamNames, lastAction });
+      tx.set(stateRef, { ...data, players, teamNames, lastAction: { type:"ADMIN_NAMES", playerId, group, ts: Date.now(), by: myUid || "unknown" } });
     });
   }
 
-  async function saveAdminSettingsRemote(nextSettings){
+  async function adminAddPlayerRemote(group, name){
+    requireAdmin();
     await db.runTransaction(async (tx)=>{
-      const snap=await tx.get(stateRef);
+      const snap = await tx.get(stateRef);
       const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
-      tx.set(stateRef,{ ...data, settings: nextSettings });
+
+      const players = data.players.slice();
+      const id = nextPlayerIdForGroup(group, players);
+
+      players.push({
+        id,
+        name: (name && name.trim()) ? name.trim() : id,
+        group,
+        score: 0
+      });
+
+      tx.set(stateRef, { ...data, players, lastAction: { type:"ADMIN_ADD_PLAYER", group, id, ts: Date.now(), by: myUid || "unknown" } });
     });
   }
 
-  async function resetScoresRemote(factory=false){
-    await db.runTransaction(async (tx)=>{
-      const snap=await tx.get(stateRef);
-      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
-      if(factory){ tx.set(stateRef,clone(DEFAULT_STATE)); return; }
-
-      const players = data.players.map(p=>({ ...p, score:0 }));
-      const groupBonus = defaultGroupBonus();
-      tx.set(stateRef,{ ...data, players, groupBonus, lastAction:null });
-    });
-  }
-
+  /***********************
+   * 5) render
+   ***********************/
   function renderModePill(){
-    $("modePill").textContent=`模式：${mode==="judge"?"關主":"管理者"}`;
-    $("judgePanel").style.display=mode==="judge"?"":"none";
-    $("adminPanel").style.display=mode==="admin"?"":"none";
+    $("modePill").textContent = `模式：${mode === "judge" ? "關主" : "管理者"}`;
+    $("judgePanel").style.display = (mode === "judge") ? "" : "none";
+    $("adminPanel").style.display = (mode === "admin") ? "" : "none";
   }
 
   function renderGroupFilter(){
-    const groups=Array.from(new Set(state.players.map(p=>p.group))).sort();
-    const sel=$("groupFilter");
-    const current=sel.value||"ALL";
-    sel.innerHTML="";
-    const optAll=document.createElement("option"); optAll.value="ALL"; optAll.textContent="全部"; sel.appendChild(optAll);
-    for(const g of groups){
-      const team = state.teamNames?.[g] || `第 ${g} 組`;
-      const opt=document.createElement("option");
-      opt.value=g;
-      opt.textContent=team;
+    const sel = $("groupFilter");
+    const current = sel.value || "ALL";
+    sel.innerHTML = "";
+
+    const optAll = document.createElement("option");
+    optAll.value = "ALL"; optAll.textContent = "全部";
+    sel.appendChild(optAll);
+
+    for (const g of groups19()) {
+      const opt = document.createElement("option");
+      opt.value = g;
+      opt.textContent = state.teamNames?.[g] || `第${g}組`;
       sel.appendChild(opt);
     }
-    sel.value=current;
+    sel.value = (current === "ALL" || groups19().includes(current)) ? current : "ALL";
   }
 
   function renderPlayerList(){
-    const query=$("searchInput").value.trim().toLowerCase();
-    const group=$("groupFilter").value||"ALL";
+    const query = $("searchInput").value.trim().toLowerCase();
+    const group = $("groupFilter").value || "ALL";
 
-    const list=state.players
-      .filter(p=>group==="ALL"?true:p.group===group)
-      .filter(p=>!query?true:((p.name||"").toLowerCase().includes(query) || p.id.toLowerCase().includes(query)))
-      .sort((a,b)=>a.id.localeCompare(b.id,"en"));
+    const list = state.players
+      .filter(p => group === "ALL" ? true : p.group === group)
+      .filter(p => {
+        if (!query) return true;
+        const name = (p.name || "").toLowerCase();
+        return name.includes(query) || p.id.toLowerCase().includes(query);
+      })
+      .sort((a,b) => a.id.localeCompare(b.id, "en"));
 
-    const sel=$("playerSelect"); sel.innerHTML="";
-    for(const p of list){
-      const team = state.teamNames?.[p.group] || `第 ${p.group} 組`;
+    const sel = $("playerSelect");
+    sel.innerHTML = "";
+
+    for (const p of list) {
+      const team = state.teamNames?.[p.group] || `第${p.group}組`;
       const labelName = (p.name && p.name !== p.id) ? ` ${p.name}` : "";
-      const opt=document.createElement("option");
-      opt.value=p.id;
-      opt.textContent=`${p.id}${labelName}（${team}） 分數：${p.score}`;
-      if(p.id===selectedPlayerId) opt.selected=true;
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = `${p.id}${labelName}（${team}） 分數：${p.score}`;
+      if (p.id === selectedPlayerId) opt.selected = true;
       sel.appendChild(opt);
     }
-    if(list.length && !list.some(p=>p.id===selectedPlayerId)) selectedPlayerId=list[0].id;
-    if(!list.length) selectedPlayerId=null;
+
+    if (list.length && !list.some(p => p.id === selectedPlayerId)) selectedPlayerId = list[0].id;
+    if (!list.length) selectedPlayerId = null;
   }
 
   function renderKPIs(){
-    const p=selectedPlayerId?getPlayer(state.players,selectedPlayerId):null;
-    const totals=groupTotals(state.players, state.groupBonus);
+    const p = selectedPlayerId ? getPlayer(state.players, selectedPlayerId) : null;
+    const totals = groupTotals(state.players, state.groupBonus);
 
-    const team = p ? (state.teamNames?.[p.group] || `第 ${p.group} 組`) : "—";
+    const team = p ? (state.teamNames?.[p.group] || `第${p.group}組`) : "—";
 
-    $("kpiPlayer").textContent=p ? `${p.id} ${p.name || ""}`.trim() : "—";
-    $("kpiPlayerScore").textContent=p?String(p.score):"0";
-    $("kpiGroup").textContent=team;
-    $("kpiGroupScore").textContent=p?String(totals[p.group]??0):"0";
-    $("kpiGroupBonus").textContent=p?String(state.groupBonus?.[p.group] ?? 0):"0";
+    $("kpiPlayer").textContent = p ? `${p.id} ${(p.name||"")}`.trim() : "—";
+    $("kpiPlayerScore").textContent = p ? String(p.score) : "0";
+    $("kpiGroup").textContent = team;
+    $("kpiGroupScore").textContent = p ? String(totals[p.group] ?? 0) : "0";
+    $("kpiGroupBonus").textContent = p ? String(state.groupBonus?.[p.group] ?? 0) : "0";
 
-    // ✅ 把目前值帶到輸入框（方便直接改）
-    $("playerNameInput").value = p ? (p.name || "") : "";
-    $("teamNameInput").value = p ? (state.teamNames?.[p.group] || "") : "";
-
-    if(state.lastAction){
-      const a=state.lastAction;
+    if (state.lastAction) {
+      const a = state.lastAction;
       if (a.type === "GROUP_ONLY") {
-        const sign=a.delta>0?"+":"";
-        $("lastActionText").textContent=`上一步：${state.teamNames?.[a.group] || ("第 "+a.group+" 組")}（只加小組） ${sign}${a.delta}（原本額外分 ${a.prevGroupBonus}）`;
-      } else if (a.type === "NAMES") {
-        $("lastActionText").textContent=`上一步：已更新名字（${a.playerId} / ${a.group}）`;
+        const sign = a.delta > 0 ? "+" : "";
+        const gname = state.teamNames?.[a.group] || `第${a.group}組`;
+        $("lastActionText").textContent = `上一步：${gname}（只加小組） ${sign}${a.delta}（原本額外分 ${a.prevGroupBonus}）`;
+      } else if (a.type === "PLAYER") {
+        const sign = a.delta > 0 ? "+" : "";
+        $("lastActionText").textContent = `上一步：${a.playerId} ${sign}${a.delta}（原本 ${a.prevScore}）`;
+      } else if (String(a.type||"").startsWith("ADMIN")) {
+        $("lastActionText").textContent = `上一步：管理者操作（${a.type}）`;
       } else {
-        const sign=a.delta>0?"+":"";
-        $("lastActionText").textContent=`上一步：${a.playerId} ${sign}${a.delta}（原本 ${a.prevScore}）`;
+        $("lastActionText").textContent = "上一步：已更新";
       }
-    }else $("lastActionText").textContent="尚無操作";
+    } else {
+      $("lastActionText").textContent = "尚無操作";
+    }
   }
 
   function renderScoreButtons(){
-    const row=$("scoreButtonsRow"); row.innerHTML="";
-    const p=selectedPlayerId?getPlayer(state.players,selectedPlayerId):null;
-    const disabled=!p || !connected;
+    const row = $("scoreButtonsRow");
+    row.innerHTML = "";
+
+    const p = selectedPlayerId ? getPlayer(state.players, selectedPlayerId) : null;
+    const disabled = !p || !connected;
 
     const groupOnly = $("groupOnlyToggle")?.checked === true;
 
-    for(const v of state.settings.plusValues){
-      const b=document.createElement("button");
-      b.className="btn big primary"; b.textContent=`+${v}`; b.disabled=disabled;
-      b.onclick=()=> groupOnly ? applyGroupBonusRemote(p.group, +v) : applyDeltaRemote(p.id, +v);
+    for (const v of state.settings.plusValues) {
+      const b = document.createElement("button");
+      b.className = "btn big primary";
+      b.textContent = `+${v}`;
+      b.disabled = disabled;
+      b.onclick = () => groupOnly ? applyGroupBonusRemote(p.group, +v) : applyDeltaRemote(p.id, +v);
       row.appendChild(b);
     }
-    for(const v of state.settings.minusValues){
-      const b=document.createElement("button");
-      b.className="btn big danger"; b.textContent=`-${v}`; b.disabled=disabled;
-      b.onclick=()=> groupOnly ? applyGroupBonusRemote(p.group, -v) : applyDeltaRemote(p.id, -v);
+
+    for (const v of state.settings.minusValues) {
+      const b = document.createElement("button");
+      b.className = "btn big danger";
+      b.textContent = `-${v}`;
+      b.disabled = disabled;
+      b.onclick = () => groupOnly ? applyGroupBonusRemote(p.group, -v) : applyDeltaRemote(p.id, -v);
       row.appendChild(b);
     }
   }
 
   function renderPersonalTable(){
-    const tbody=$("personalTable").querySelector("tbody"); tbody.innerHTML="";
-    const sorted=[...state.players].sort((a,b)=>(b.score-a.score)||a.id.localeCompare(b.id,"en"));
-    $("personalCount").textContent=`${sorted.length} 人`;
-    sorted.forEach((p,i)=>{
-      const tr=document.createElement("tr");
-      const team = state.teamNames?.[p.group] || `第 ${p.group} 組`;
+    const tbody = $("personalTable").querySelector("tbody");
+    tbody.innerHTML = "";
+
+    const sorted = [...state.players].sort((a,b) => (b.score - a.score) || a.id.localeCompare(b.id, "en"));
+    $("personalCount").textContent = `${sorted.length} 人`;
+
+    sorted.forEach((p, i) => {
+      const team = state.teamNames?.[p.group] || `第${p.group}組`;
       const displayName = (p.name && p.name !== p.id) ? `${p.id} ${p.name}` : p.id;
-      tr.innerHTML=`<td>${i+1}</td><td>${displayName}</td><td>${team}</td><td>${p.score}</td>`;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${i+1}</td><td>${displayName}</td><td>${team}</td><td>${p.score}</td>`;
       tbody.appendChild(tr);
     });
   }
 
   function renderGroupTable(){
-    const tbody=$("groupTable").querySelector("tbody"); tbody.innerHTML="";
-    const totals=groupTotals(state.players, state.groupBonus);
-    const groups=Object.keys(totals).sort((a,b)=>a.localeCompare(b,"en"));
-    const sorted=groups.map(g=>({group:g,total:totals[g]})).sort((a,b)=>b.total-a.total||a.group.localeCompare(b.group,"en"));
-    $("groupCount").textContent=`${sorted.length} 組`;
-    sorted.forEach((g,i)=>{
-      const tr=document.createElement("tr");
-      const team = state.teamNames?.[g.group] || `第 ${g.group} 組`;
-      tr.innerHTML=`<td>${i+1}</td><td>${team}</td><td>${g.total}</td>`;
+    const tbody = $("groupTable").querySelector("tbody");
+    tbody.innerHTML = "";
+
+    const totals = groupTotals(state.players, state.groupBonus);
+    const groups = groups19();
+    const sorted = groups.map(g => ({ group: g, total: totals[g] ?? 0 }))
+      .sort((a,b)=> (b.total - a.total) || a.group.localeCompare(b.group, "en"));
+
+    $("groupCount").textContent = `${sorted.length} 組`;
+
+    sorted.forEach((g, i) => {
+      const team = state.teamNames?.[g.group] || `第${g.group}組`;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${i+1}</td><td>${team}</td><td>${g.total}</td>`;
       tbody.appendChild(tr);
     });
   }
 
   function renderAdminPanel(){
-    $("adminPlusValues").value=state.settings.plusValues.join(",");
-    $("adminMinusValues").value=state.settings.minusValues.join(",");
-    $("adminAllowNegative").value=String(state.settings.allowNegative);
-    $("adminPin").value=state.settings.adminPin;
+    $("adminPlusValues").value = state.settings.plusValues.join(",");
+    $("adminMinusValues").value = state.settings.minusValues.join(",");
+    $("adminAllowNegative").value = String(state.settings.allowNegative);
+    $("adminPin").value = state.settings.adminPin;
+  }
+
+  function renderAdminRoster(){
+    // players select
+    const sel = $("adminPlayerSelect");
+    if (sel) {
+      const current = sel.value;
+      sel.innerHTML = "";
+      const sorted = [...state.players].sort((a,b)=>a.id.localeCompare(b.id,"en"));
+      for (const p of sorted) {
+        const team = state.teamNames?.[p.group] || `第${p.group}組`;
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = `${p.id} ${p.name || ""}（${team}）`;
+        sel.appendChild(opt);
+      }
+      if (current && sorted.some(p=>p.id===current)) sel.value = current;
+      if (!sel.value && sorted.length) sel.value = sorted[0].id;
+    }
+
+    // add group select
+    const addGroup = $("adminAddGroup");
+    if (addGroup) {
+      const cur = addGroup.value;
+      addGroup.innerHTML = "";
+      for (const g of groups19()) {
+        const opt = document.createElement("option");
+        opt.value = g;
+        opt.textContent = state.teamNames?.[g] || `第${g}組`;
+        addGroup.appendChild(opt);
+      }
+      addGroup.value = (cur && groups19().includes(cur)) ? cur : "1";
+    }
+
+    // fill fields for selected admin player
+    const pid = $("adminPlayerSelect")?.value;
+    const p = pid ? getPlayer(state.players, pid) : null;
+
+    if ($("adminPlayerNameInput")) $("adminPlayerNameInput").value = p ? (p.name || "") : "";
+    if ($("adminPlayerGroupView")) $("adminPlayerGroupView").value = p ? p.group : "";
+    if ($("adminTeamNameInput")) $("adminTeamNameInput").value = p ? (state.teamNames?.[p.group] || "") : "";
   }
 
   function renderAll(){
@@ -530,138 +710,196 @@
     renderScoreButtons();
     renderPersonalTable();
     renderGroupTable();
-    if(mode==="admin") renderAdminPanel();
+
+    if (mode === "admin") {
+      renderAdminPanel();
+      renderAdminRoster();
+    }
   }
 
-  function openPinModal(){ $("pinModal").style.display="flex"; $("pinInput").value=""; $("pinInput").focus(); }
-  function closePinModal(){ $("pinModal").style.display="none"; }
+  /***********************
+   * 6) UI events
+   ***********************/
+  function openPinModal(){ $("pinModal").style.display = "flex"; $("pinInput").value = ""; $("pinInput").focus(); }
+  function closePinModal(){ $("pinModal").style.display = "none"; }
 
-  on("pinCancelBtn","click",closePinModal);
-  on("pinOkBtn","click",()=>{
-    const pin=$("pinInput").value.trim();
-    if(pin===state.settings.adminPin){ mode="admin"; closePinModal(); renderAll(); }
+  on("pinCancelBtn", "click", closePinModal);
+  on("pinOkBtn", "click", ()=>{
+    const pin = $("pinInput").value.trim();
+    if (pin === state.settings.adminPin) { mode = "admin"; closePinModal(); renderAll(); }
     else alert("PIN 錯誤");
   });
 
-  on("searchInput","input",renderAll);
-  on("groupFilter","change",renderAll);
-  on("playerSelect","change",(e)=>{ selectedPlayerId=e.target.value; renderAll(); });
+  on("switchModeBtn", "click", ()=>{
+    if (mode === "judge") openPinModal();
+    else { mode = "judge"; renderAll(); }
+  });
 
-  on("groupOnlyToggle","change",renderAll);
+  on("searchInput", "input", renderAll);
+  on("groupFilter", "change", renderAll);
+  on("playerSelect", "change", (e)=>{ selectedPlayerId = e.target.value; renderAll(); });
+  on("groupOnlyToggle", "change", renderAll);
 
-  on("switchModeBtn","click",()=>{ if(mode==="judge") openPinModal(); else { mode="judge"; renderAll(); } });
-
-  on("undoBtn","click",async ()=>{
-    if(!state.lastAction) return;
-    const a=state.lastAction;
-    if (a.type === "GROUP_ONLY") {
-      await applyGroupBonusRemote(a.group, -a.delta);
-    } else if (a.type === "PLAYER") {
-      await applyDeltaRemote(a.playerId, -a.delta);
-    } else {
-      alert("名字更新不支援復原（避免覆蓋他人剛改的名字）");
+  on("undoBtn", "click", async ()=>{
+    if (!state.lastAction) return;
+    const a = state.lastAction;
+    try{
+      if (a.type === "GROUP_ONLY") await applyGroupBonusRemote(a.group, -a.delta);
+      else if (a.type === "PLAYER") await applyDeltaRemote(a.playerId, -a.delta);
+      else alert("這個操作不支援復原（避免覆蓋他人剛做的管理者修改）");
+    }catch(e){
+      console.error(e);
+      alert("復原失敗");
     }
   });
 
-  // ✅ 儲存名字（同步）
-  on("saveNamesBtn","click", async ()=>{
-    const p = selectedPlayerId ? getPlayer(state.players, selectedPlayerId) : null;
-    if (!p) return alert("請先選一位玩家");
+  on("adminSaveBtn", "click", async ()=>{
+    if (mode !== "admin") return alert("只有管理者可以操作");
+    const plus = parseNumberList($("adminPlusValues").value);
+    const minus = parseNumberList($("adminMinusValues").value);
+    if (!plus.length) return alert("加分按鈕至少要有一個非零數值");
 
-    const newPlayerName = $("playerNameInput").value.trim();
-    const newTeamName = $("teamNameInput").value.trim();
-
-    if (!newPlayerName && !newTeamName) return alert("至少輸入一個：小隊員名字或小隊名字");
+    const nextSettings = {
+      plusValues: plus,
+      minusValues: minus,
+      allowNegative: $("adminAllowNegative").value === "true",
+      adminPin: $("adminPin").value.trim() || state.settings.adminPin
+    };
 
     try{
-      await saveNamesRemote(p.id, newPlayerName, p.group, newTeamName);
+      await saveAdminSettingsRemote(nextSettings);
+      alert("已儲存設定（已同步）");
+    }catch(e){
+      console.error(e);
+      if (String(e.message).includes("admin_required")) return;
+      alert("儲存失敗");
+    }
+  });
+
+  on("resetScoresBtn", "click", async ()=>{
+    if (mode !== "admin") return alert("只有管理者可以操作");
+    if (!confirm("確定要重設所有分數為 0？（個人+小組額外分都會清空）")) return;
+    try{
+      await resetScoresRemote(false);
+      alert("已重設（已同步）");
+    }catch(e){
+      console.error(e);
+      if (String(e.message).includes("admin_required")) return;
+      alert("重設失敗");
+    }
+  });
+
+  on("factoryResetBtn", "click", async ()=>{
+    if (mode !== "admin") return alert("只有管理者可以操作");
+    if (!confirm("確定要恢復預設？（分數+設定+名單全部回到初始 9組x10人）")) return;
+    try{
+      await resetScoresRemote(true);
+      alert("已恢復預設（已同步）");
+    }catch(e){
+      console.error(e);
+      if (String(e.message).includes("admin_required")) return;
+      alert("恢復失敗");
+    }
+  });
+
+  on("adminPlayerSelect", "change", renderAdminRoster);
+
+  on("adminSaveNamesBtn", "click", async ()=>{
+    if (mode !== "admin") return alert("只有管理者可以操作");
+    const pid = $("adminPlayerSelect").value;
+    const p = getPlayer(state.players, pid);
+    if (!p) return alert("找不到玩家");
+
+    const newPlayerName = $("adminPlayerNameInput").value.trim();
+    const newTeamName = $("adminTeamNameInput").value.trim();
+    if (!newPlayerName && !newTeamName) return alert("至少輸入一個：名字或小隊名");
+
+    try{
+      await adminSaveNamesRemote(p.id, newPlayerName, p.group, newTeamName);
       alert("已儲存（已同步）");
     }catch(e){
       console.error(e);
-      alert("儲存失敗，請再試一次");
+      if (String(e.message).includes("admin_required")) return;
+      alert("儲存失敗");
     }
   });
 
-  on("adminSaveBtn","click",async ()=>{
-    const plus=parseNumberList($("adminPlusValues").value);
-    const minus=parseNumberList($("adminMinusValues").value);
-    if(!plus.length) return alert("加分按鈕至少要有一個非零數值");
-    const nextSettings={
-      plusValues:plus,
-      minusValues:minus,
-      allowNegative:$("adminAllowNegative").value==="true",
-      adminPin:$("adminPin").value.trim()||state.settings.adminPin
-    };
-    await saveAdminSettingsRemote(nextSettings);
-    alert("已儲存設定（已同步）");
+  on("adminAddPlayerBtn", "click", async ()=>{
+    if (mode !== "admin") return alert("只有管理者可以操作");
+    const group = $("adminAddGroup").value;
+    const name = $("adminAddName").value.trim();
+    if (!group) return alert("請選擇小組");
+
+    try{
+      await adminAddPlayerRemote(group, name);
+      $("adminAddName").value = "";
+      alert("已新增（已同步）");
+    }catch(e){
+      console.error(e);
+      if (String(e.message).includes("admin_required")) return;
+      alert("新增失敗");
+    }
   });
 
-  on("resetScoresBtn","click",async ()=>{
-    if(!confirm("確定要重設所有分數為 0？（個人+小組額外分都會清空）")) return;
-    await resetScoresRemote(false);
-  });
+  on("exportBtn", "click", ()=>{
+    const totals = groupTotals(state.players, state.groupBonus);
+    const personal = [...state.players].sort((a,b)=>(b.score-a.score)||a.id.localeCompare(b.id,"en"));
 
-  on("factoryResetBtn","click",async ()=>{
-    if(!confirm("確定要恢復預設（分數+設定全部重設）？")) return;
-    await resetScoresRemote(true);
-  });
-
-  on("exportBtn","click",()=>{
-    const totals=groupTotals(state.players, state.groupBonus);
-    const personal=[...state.players].sort((a,b)=>(b.score-a.score)||a.id.localeCompare(b.id,"en"));
-    const groupSorted=Object.keys(totals).map(g=>({g,t:totals[g]})).sort((a,b)=>(b.t-a.t)||a.g.localeCompare(b.g,"en"));
-
-    const lines=[];
+    const lines = [];
     lines.push("TYPE,Rank,ID,Name,Group,TeamName,Score");
     personal.forEach((p,i)=>{
-      const team = state.teamNames?.[p.group] || `第 ${p.group} 組`;
-      lines.push(`PERSONAL,${i+1},${p.id},${p.name||""},${p.group},"${team}",${p.score}`);
+      const team = state.teamNames?.[p.group] || `第${p.group}組`;
+      lines.push(`PERSONAL,${i+1},${p.id},"${(p.name||"").replace(/"/g,'""')}",${p.group},"${team.replace(/"/g,'""')}",${p.score}`);
     });
 
     lines.push("");
     lines.push("TYPE,Group,TeamName,GroupBonus");
-    const gb = state.groupBonus || defaultGroupBonus();
-    const tn = state.teamNames || defaultTeamNames();
-    Object.keys(gb).sort().forEach(g=>{
-      lines.push(`GROUP_BONUS,${g},"${tn[g]||("第 "+g+" 組")}",${gb[g]}`);
-    });
+    for (const g of groups19()) {
+      const team = state.teamNames?.[g] || `第${g}組`;
+      const gb = Number(state.groupBonus?.[g] ?? 0);
+      lines.push(`GROUP_BONUS,${g},"${team.replace(/"/g,'""')}",${gb}`);
+    }
 
     lines.push("");
     lines.push("TYPE,Rank,Group,TeamName,Total");
+    const groupSorted = groups19().map(g => ({ g, t: totals[g] ?? 0 }))
+      .sort((a,b)=>(b.t-a.t)||a.g.localeCompare(b.g,"en"));
     groupSorted.forEach((x,i)=>{
-      const team = tn[x.g] || `第 ${x.g} 組`;
-      lines.push(`GROUP,${i+1},${x.g},"${team}",${x.t}`);
+      const team = state.teamNames?.[x.g] || `第${x.g}組`;
+      lines.push(`GROUP,${i+1},${x.g},"${team.replace(/"/g,'""')}",${x.t}`);
     });
 
-    const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
-    downloadText(`ignite-scores-${stamp}.csv`,lines.join("\n"));
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+    downloadText(`ignite-scores-${stamp}.csv`, lines.join("\n"));
   });
 
-  // Boot
+  /***********************
+   * 7) boot
+   ***********************/
   renderAll();
-  $("syncPill").textContent="同步：登入中…";
+  $("syncPill").textContent = "同步：登入中…";
 
   auth.onAuthStateChanged(async (user)=>{
-    if(!user) return;
-    myUid=user.uid;
+    if (!user) return;
+    myUid = user.uid;
     try{
       await ensureRemoteInitialized();
       attachRealtimeListener();
-      connected=true;
-      $("syncPill").textContent="同步：已連線";
+      connected = true;
+      $("syncPill").textContent = "同步：已連線";
       renderAll();
     }catch(e){
       console.error(e);
-      connected=false;
-      $("syncPill").textContent="同步：設定錯誤";
+      connected = false;
+      $("syncPill").textContent = "同步：設定錯誤";
       renderAll();
     }
   });
 
   auth.signInAnonymously().catch((e)=>{
     console.error(e);
-    connected=false;
-    $("syncPill").textContent="同步：無法登入";
+    connected = false;
+    $("syncPill").textContent = "同步：無法登入";
   });
 </script>
 </body>
