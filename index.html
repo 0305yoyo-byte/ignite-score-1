@@ -54,7 +54,7 @@
     <div class="row">
       <div class="grow">
         <label class="muted">搜尋玩家（姓名 / 編號）</label>
-        <input id="searchInput" placeholder="例如：A01" />
+        <input id="searchInput" placeholder="例如：A01 或 小明" />
       </div>
       <div style="min-width: 160px;">
         <label class="muted">顯示小組</label>
@@ -75,12 +75,26 @@
           <div class="box"><div class="label">個人分數</div><div class="value" id="kpiPlayerScore">0</div></div>
           <div class="box"><div class="label">所屬小組</div><div class="value" id="kpiGroup">—</div></div>
           <div class="box"><div class="label">小組總分</div><div class="value" id="kpiGroupScore">0</div></div>
-          <!-- ✅ 新增：只加小組的額外分數顯示 -->
           <div class="box"><div class="label">小組額外分</div><div class="value" id="kpiGroupBonus">0</div></div>
         </div>
 
+        <!-- ✅ 新增：設定小隊員名字 / 小隊名字 -->
+        <div class="row" style="margin-top:10px;">
+          <div class="grow">
+            <label class="muted">小隊員名字（同步）</label>
+            <input id="playerNameInput" placeholder="例如：鈾恩" />
+          </div>
+          <div class="grow">
+            <label class="muted">小隊名字（同步）</label>
+            <input id="teamNameInput" placeholder="例如：量子火箭隊" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button class="btn primary" id="saveNamesBtn">儲存名字（同步）</button>
+          <span class="muted">提示：先選玩家，再輸入名字/小隊名，按儲存。</span>
+        </div>
+
         <div id="judgePanel" style="margin-top:12px;">
-          <!-- ✅ 新增：只加小組分數 toggle -->
           <div class="row" style="margin-bottom:10px;">
             <label style="display:flex; gap:8px; align-items:center;">
               <input type="checkbox" id="groupOnlyToggle" />
@@ -215,15 +229,20 @@
     return players;
   }
 
-  // ✅ 新增：小組額外分（不算在個人）
   function defaultGroupBonus() {
     return { A:0, B:0, C:0, D:0, E:0, F:0, G:0, H:0, I:0 };
+  }
+
+  // ✅ 新增：小隊名字（每組一個）
+  function defaultTeamNames() {
+    return { A:"第 A 組", B:"第 B 組", C:"第 C 組", D:"第 D 組", E:"第 E 組", F:"第 F 組", G:"第 G 組", H:"第 H 組", I:"第 I 組" };
   }
 
   const DEFAULT_STATE = {
     settings: { plusValues:[2,5,10,15], minusValues:[2,5,10], allowNegative:true, adminPin:"2468" },
     players: buildDefaultPlayers(),
-    groupBonus: defaultGroupBonus(),  // ✅新增
+    groupBonus: defaultGroupBonus(),
+    teamNames: defaultTeamNames(),   // ✅新增
     lastAction: null
   };
 
@@ -233,6 +252,7 @@
       settings: { ...DEFAULT_STATE.settings, ...(s.settings || {}) },
       players: Array.isArray(s.players) ? s.players : clone(DEFAULT_STATE.players),
       groupBonus: s.groupBonus ? { ...defaultGroupBonus(), ...s.groupBonus } : clone(DEFAULT_STATE.groupBonus),
+      teamNames: s.teamNames ? { ...defaultTeamNames(), ...s.teamNames } : clone(DEFAULT_STATE.teamNames), // ✅新增
       lastAction: s.lastAction ?? null
     };
   }
@@ -252,7 +272,6 @@
   let connected = false;
   let myUid = null;
 
-  // ✅ 小組總分 = 個人加總 + groupBonus
   function groupTotals(players, groupBonus){
     const t={};
     for(const p of players) t[p.group]=(t[p.group]??0)+(Number(p.score)||0);
@@ -314,7 +333,6 @@
     });
   }
 
-  // ✅ 新增：只加小組額外分（不算個人）
   async function applyGroupBonusRemote(group, delta){
     if(!group) return;
     await db.runTransaction(async (tx)=>{
@@ -328,6 +346,29 @@
 
       const lastAction={ type:"GROUP_ONLY", group, delta, prevGroupBonus:prev, ts:Date.now(), by:myUid||"unknown" };
       tx.set(stateRef,{ ...data, groupBonus, lastAction });
+    });
+  }
+
+  // ✅ 新增：儲存玩家名字 + 小隊名字（同步）
+  async function saveNamesRemote(playerId, newPlayerName, group, newTeamName){
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(stateRef);
+      const data = normalizeState(snap.exists ? snap.data() : clone(DEFAULT_STATE));
+
+      const players = data.players.slice();
+      const idx = players.findIndex(p => p.id === playerId);
+      if (idx < 0) throw new Error("player not found");
+
+      if (newPlayerName) {
+        players[idx] = { ...players[idx], name: newPlayerName };
+      }
+
+      const teamNames = { ...data.teamNames };
+      if (group && newTeamName) teamNames[group] = newTeamName;
+
+      const lastAction = { type:"NAMES", playerId, group, ts:Date.now(), by:myUid||"unknown" };
+
+      tx.set(stateRef, { ...data, players, teamNames, lastAction });
     });
   }
 
@@ -346,7 +387,7 @@
       if(factory){ tx.set(stateRef,clone(DEFAULT_STATE)); return; }
 
       const players = data.players.map(p=>({ ...p, score:0 }));
-      const groupBonus = defaultGroupBonus(); // ✅ 重設時也清掉小組額外分
+      const groupBonus = defaultGroupBonus();
       tx.set(stateRef,{ ...data, players, groupBonus, lastAction:null });
     });
   }
@@ -364,7 +405,11 @@
     sel.innerHTML="";
     const optAll=document.createElement("option"); optAll.value="ALL"; optAll.textContent="全部"; sel.appendChild(optAll);
     for(const g of groups){
-      const opt=document.createElement("option"); opt.value=g; opt.textContent=`第 ${g} 組`; sel.appendChild(opt);
+      const team = state.teamNames?.[g] || `第 ${g} 組`;
+      const opt=document.createElement("option");
+      opt.value=g;
+      opt.textContent=team;
+      sel.appendChild(opt);
     }
     sel.value=current;
   }
@@ -372,14 +417,19 @@
   function renderPlayerList(){
     const query=$("searchInput").value.trim().toLowerCase();
     const group=$("groupFilter").value||"ALL";
+
     const list=state.players
       .filter(p=>group==="ALL"?true:p.group===group)
-      .filter(p=>!query?true:(p.name.toLowerCase().includes(query)||p.id.toLowerCase().includes(query)))
+      .filter(p=>!query?true:((p.name||"").toLowerCase().includes(query) || p.id.toLowerCase().includes(query)))
       .sort((a,b)=>a.id.localeCompare(b.id,"en"));
+
     const sel=$("playerSelect"); sel.innerHTML="";
     for(const p of list){
+      const team = state.teamNames?.[p.group] || `第 ${p.group} 組`;
+      const labelName = (p.name && p.name !== p.id) ? ` ${p.name}` : "";
       const opt=document.createElement("option");
-      opt.value=p.id; opt.textContent=`${p.id}（第${p.group}組） 分數：${p.score}`;
+      opt.value=p.id;
+      opt.textContent=`${p.id}${labelName}（${team}） 分數：${p.score}`;
       if(p.id===selectedPlayerId) opt.selected=true;
       sel.appendChild(opt);
     }
@@ -391,17 +441,25 @@
     const p=selectedPlayerId?getPlayer(state.players,selectedPlayerId):null;
     const totals=groupTotals(state.players, state.groupBonus);
 
-    $("kpiPlayer").textContent=p?p.name:"—";
+    const team = p ? (state.teamNames?.[p.group] || `第 ${p.group} 組`) : "—";
+
+    $("kpiPlayer").textContent=p ? `${p.id} ${p.name || ""}`.trim() : "—";
     $("kpiPlayerScore").textContent=p?String(p.score):"0";
-    $("kpiGroup").textContent=p?`第 ${p.group} 組`:"—";
+    $("kpiGroup").textContent=team;
     $("kpiGroupScore").textContent=p?String(totals[p.group]??0):"0";
     $("kpiGroupBonus").textContent=p?String(state.groupBonus?.[p.group] ?? 0):"0";
+
+    // ✅ 把目前值帶到輸入框（方便直接改）
+    $("playerNameInput").value = p ? (p.name || "") : "";
+    $("teamNameInput").value = p ? (state.teamNames?.[p.group] || "") : "";
 
     if(state.lastAction){
       const a=state.lastAction;
       if (a.type === "GROUP_ONLY") {
         const sign=a.delta>0?"+":"";
-        $("lastActionText").textContent=`上一步：第 ${a.group} 組（只加小組） ${sign}${a.delta}（原本額外分 ${a.prevGroupBonus}）`;
+        $("lastActionText").textContent=`上一步：${state.teamNames?.[a.group] || ("第 "+a.group+" 組")}（只加小組） ${sign}${a.delta}（原本額外分 ${a.prevGroupBonus}）`;
+      } else if (a.type === "NAMES") {
+        $("lastActionText").textContent=`上一步：已更新名字（${a.playerId} / ${a.group}）`;
       } else {
         const sign=a.delta>0?"+":"";
         $("lastActionText").textContent=`上一步：${a.playerId} ${sign}${a.delta}（原本 ${a.prevScore}）`;
@@ -436,7 +494,9 @@
     $("personalCount").textContent=`${sorted.length} 人`;
     sorted.forEach((p,i)=>{
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${i+1}</td><td>${p.name}</td><td>${p.group}</td><td>${p.score}</td>`;
+      const team = state.teamNames?.[p.group] || `第 ${p.group} 組`;
+      const displayName = (p.name && p.name !== p.id) ? `${p.id} ${p.name}` : p.id;
+      tr.innerHTML=`<td>${i+1}</td><td>${displayName}</td><td>${team}</td><td>${p.score}</td>`;
       tbody.appendChild(tr);
     });
   }
@@ -449,7 +509,8 @@
     $("groupCount").textContent=`${sorted.length} 組`;
     sorted.forEach((g,i)=>{
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${i+1}</td><td>第 ${g.group} 組</td><td>${g.total}</td>`;
+      const team = state.teamNames?.[g.group] || `第 ${g.group} 組`;
+      tr.innerHTML=`<td>${i+1}</td><td>${team}</td><td>${g.total}</td>`;
       tbody.appendChild(tr);
     });
   }
@@ -486,19 +547,38 @@
   on("groupFilter","change",renderAll);
   on("playerSelect","change",(e)=>{ selectedPlayerId=e.target.value; renderAll(); });
 
-  on("groupOnlyToggle","change",renderAll); // ✅ toggle 變更重畫
+  on("groupOnlyToggle","change",renderAll);
 
   on("switchModeBtn","click",()=>{ if(mode==="judge") openPinModal(); else { mode="judge"; renderAll(); } });
 
   on("undoBtn","click",async ()=>{
     if(!state.lastAction) return;
     const a=state.lastAction;
-
-    // 注意：同步版「復原」其實是再送一筆反向操作；GROUP_ONLY 也支援
     if (a.type === "GROUP_ONLY") {
       await applyGroupBonusRemote(a.group, -a.delta);
-    } else {
+    } else if (a.type === "PLAYER") {
       await applyDeltaRemote(a.playerId, -a.delta);
+    } else {
+      alert("名字更新不支援復原（避免覆蓋他人剛改的名字）");
+    }
+  });
+
+  // ✅ 儲存名字（同步）
+  on("saveNamesBtn","click", async ()=>{
+    const p = selectedPlayerId ? getPlayer(state.players, selectedPlayerId) : null;
+    if (!p) return alert("請先選一位玩家");
+
+    const newPlayerName = $("playerNameInput").value.trim();
+    const newTeamName = $("teamNameInput").value.trim();
+
+    if (!newPlayerName && !newTeamName) return alert("至少輸入一個：小隊員名字或小隊名字");
+
+    try{
+      await saveNamesRemote(p.id, newPlayerName, p.group, newTeamName);
+      alert("已儲存（已同步）");
+    }catch(e){
+      console.error(e);
+      alert("儲存失敗，請再試一次");
     }
   });
 
@@ -532,17 +612,26 @@
     const groupSorted=Object.keys(totals).map(g=>({g,t:totals[g]})).sort((a,b)=>(b.t-a.t)||a.g.localeCompare(b.g,"en"));
 
     const lines=[];
-    lines.push("TYPE,Rank,ID,Name,Group,Score");
-    personal.forEach((p,i)=>lines.push(`PERSONAL,${i+1},${p.id},${p.name},${p.group},${p.score}`));
+    lines.push("TYPE,Rank,ID,Name,Group,TeamName,Score");
+    personal.forEach((p,i)=>{
+      const team = state.teamNames?.[p.group] || `第 ${p.group} 組`;
+      lines.push(`PERSONAL,${i+1},${p.id},${p.name||""},${p.group},"${team}",${p.score}`);
+    });
 
     lines.push("");
-    lines.push("TYPE,Group,GroupBonus");
+    lines.push("TYPE,Group,TeamName,GroupBonus");
     const gb = state.groupBonus || defaultGroupBonus();
-    Object.keys(gb).sort().forEach(g=>lines.push(`GROUP_BONUS,${g},${gb[g]}`));
+    const tn = state.teamNames || defaultTeamNames();
+    Object.keys(gb).sort().forEach(g=>{
+      lines.push(`GROUP_BONUS,${g},"${tn[g]||("第 "+g+" 組")}",${gb[g]}`);
+    });
 
     lines.push("");
-    lines.push("TYPE,Rank,Group,Total");
-    groupSorted.forEach((x,i)=>lines.push(`GROUP,${i+1},${x.g},${x.t}`));
+    lines.push("TYPE,Rank,Group,TeamName,Total");
+    groupSorted.forEach((x,i)=>{
+      const team = tn[x.g] || `第 ${x.g} 組`;
+      lines.push(`GROUP,${i+1},${x.g},"${team}",${x.t}`);
+    });
 
     const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
     downloadText(`ignite-scores-${stamp}.csv`,lines.join("\n"));
