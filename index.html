@@ -530,35 +530,50 @@
     sel.value = (current === "ALL" || groups19().includes(current)) ? current : "ALL";
   }
 
-  function renderPlayerList(){
-    const query = $("searchInput").value.trim().toLowerCase();
-    const group = $("groupFilter").value || "ALL";
+function renderPlayerList(){
+  const query = ($("searchInput")?.value || "").trim().toLowerCase();
+  const group = $("groupFilter")?.value || "ALL";
 
-    const list = state.players
-      .filter(p => group === "ALL" ? true : p.group === group)
-      .filter(p => {
-        if (!query) return true;
-        const name = (p.name || "").toLowerCase();
-        return name.includes(query) || p.id.toLowerCase().includes(query);
-      })
-      .sort((a,b) => a.id.localeCompare(b.id, "en"));
+  const list = state.players
+    .filter(p => group === "ALL" ? true : p.group === group)
+    .filter(p => {
+      if (!query) return true;
 
-    const sel = $("playerSelect");
-    sel.innerHTML = "";
+      const id = String(p.id || "").toLowerCase();
+      const name = String(p.name || "").toLowerCase();
+      const groupText = String(p.group || "").toLowerCase();
+      const teamName = String(state.teamNames?.[p.group] || "").toLowerCase();
 
-    for (const p of list) {
-      const team = state.teamNames?.[p.group] || `第${p.group}組`;
-      const labelName = (p.name && p.name !== p.id) ? ` ${p.name}` : "";
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = `${p.id}${labelName}（${team}） 分數：${p.score}`;
-      if (p.id === selectedPlayerId) opt.selected = true;
-      sel.appendChild(opt);
-    }
+      return (
+        id.includes(query) ||
+        name.includes(query) ||
+        groupText.includes(query) ||
+        teamName.includes(query)
+      );
+    })
+    .sort((a,b) => a.id.localeCompare(b.id, "en"));
 
-    if (list.length && !list.some(p => p.id === selectedPlayerId)) selectedPlayerId = list[0].id;
-    if (!list.length) selectedPlayerId = null;
+  const sel = $("playerSelect");
+  sel.innerHTML = "";
+
+  for (const p of list) {
+    const team = state.teamNames?.[p.group] || `第${p.group}組`;
+    const labelName = (p.name && p.name !== p.id) ? ` ${p.name}` : "";
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = `${p.id}${labelName}（${team}） 分數：${p.score}`;
+    sel.appendChild(opt);
   }
+
+  if (list.length > 0) {
+    if (!list.some(p => p.id === selectedPlayerId)) {
+      selectedPlayerId = list[0].id;
+    }
+    sel.value = selectedPlayerId;
+  } else {
+    selectedPlayerId = null;
+  }
+}
 
   function renderKPIs(){
     const p = selectedPlayerId ? getPlayer(state.players, selectedPlayerId) : null;
